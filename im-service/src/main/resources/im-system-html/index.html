@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple GUI</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+        }
+
+        .container {
+            margin: 20px;
+        }
+
+        input, button {
+            margin: 5px;
+            padding: 5px;
+        }
+
+        #serverOutput {
+            width: 100%;
+            height: 200px;
+            margin: 10px 0;
+        }
+    </style>
+    <script type="text/javascript" src="js/axios.min.js"></script>
+</head>
+<body>
+<div class="container">
+    <input type="text" id="userId" placeholder="输入登录id">
+    <input type="text" id="password" placeholder="密码">
+    <input type="text" id="toId" placeholder="发送放id">
+    <input type="text" id="groupId" placeholder="groupid">
+    <input type="text" id="message" placeholder="你要发送的信息">
+    <input type="text" id="appId" placeholder="appId">
+    <input type="text" id="clientType" placeholder="clientType">
+    <input type="text" id="imei" placeholder="imei">
+    <input type="text" id="command" placeholder="输入command">
+    <button id="loginButton">login</button>
+    <button id="sendButton">发送数据</button>
+    <button id="clearButton">清空数据</button>
+    <button id="sendgroupBtn">发送群聊</button>
+
+    <h3>服务器输出：</h3>
+    <textarea id="serverOutput" readonly>连接开启</textarea>
+</div>
+
+<script>
+    const socket = new WebSocket('ws://127.0.0.1:8090/ws');
+    socket.binaryType = 'arraybuffer';
+
+    socket.onopen = function (event) {
+        console.log('WebSocket connection established');
+    };
+
+    socket.onmessage = function (event) {
+        const arrayBuffer = event.data;
+        // Create a new TextDecoder instance
+        const decoder = new TextDecoder('utf-8');
+
+        // Decode the ArrayBuffer to a string
+        const decodedString = decoder.decode(arrayBuffer);
+        document.getElementById('serverOutput').innerText += decodedString + "\n";
+
+        console.log('Received message: ', decodedString);
+        let data = JSON.parse(decodedString);
+        // console.log('data', data);
+        if (data) {
+            if (data.command === 1103) {
+                // console.log("ack----")
+                sendAck(data);
+            }
+        }
+        // Process the received string
+    };
+
+    socket.onclose = function () {
+        console.log('WebSocket connection closed');
+    };
+
+    socket.onerror = function (error) {
+        console.error('WebSocket error: ', error);
+    };
+
+    //群聊
+    document.getElementById('sendgroupBtn').addEventListener('click', function () {
+        let userId = document.getElementById('userId').value;
+        let groupId = document.getElementById('groupId').value;
+        // 模拟发送数据功能
+        const message = document.getElementById('message').value;
+        const body = {
+            messageId: Date.now(),
+            fromId: userId,
+            groupId: groupId,
+            userId: userId,
+            userSign: 'eJyrVgrxCdZLrSjILEpVsjK0MAABHbBgYkGBZwpQDChgqIOkLCQzF6TU3NDSwtDQ0MgEIpeZkppXkpmWmVqkZKVkZGBgpAQRL85MBwrkhWcGlfgZOZeEeXi7RYTnWnoVREQYm7k7lyWlFzlHubg4GlkGpYRGeXoV2yrVAgB6myuR',
+            messageBody: message
+        };
+
+        socket.send(getMsgPack(JSON.stringify(body)));
+    });
+
+
+    //登录
+    document.getElementById('loginButton').addEventListener('click', function () {
+        let userId = document.getElementById('userId').value;
+        let password = document.getElementById('password').value;
+
+        //先登录 在进行数据发送
+        const data = {
+            userId: userId,
+            appId: 10001,
+            clientType: 1,
+            password: password
+        };
+
+        axios.post('http://localhost:8000/v1/user/login?appId=10001', data, {
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        })
+            .then((res) => {
+                sendLogin(userId, res.data);
+                console.log(res.data);
+            })
+            .catch((error) => {
+                console.error('Error:', error);
+            });
+        // 构建二进制消息
+
+
+    });
+
+    function sendLogin(userId, data) {
+        const  body={
+            userId: userId,
+            fromId: userId,
+            userSign: data.data.data.sign
+        }
+        socket.send(getMsgPack(9000,JSON.stringify(body)));
+    }
+
+    function getMsgPack(command,body) {
+        // const command = parseInt(document.getElementById('command').value); // 确保是整数
+        const version = 2;
+        const clientType = document.getElementById('clientType').value;
+        const messageType = 0; // 假设0表示JSON
+        const appId = 10001;
+        const imei = document.getElementById('imei').value;
+        console.log("body", body);
+
+        // 计算长度
+        const imeiLen = imei.length;
+        const bodyLen = body.length;
+
+        console.log(`command: ${command}, version: ${version}, clientType: ${clientType}, messageType: ${messageType}, appId: ${appId}`);
+        // console.log(`imeiLen: ${imeiLen}, bodyLen: ${bodyLen}`);
+
+        // 创建ArrayBuffer
+        const buffer = new ArrayBuffer(28 + imeiLen + bodyLen);
+
+        const dataView = new DataView(buffer);
+        let offset = 0;
+
+        // 写入数据
+        dataView.setInt32(offset, command);
+        offset += 4;
+        dataView.setInt32(offset, version);
+        offset += 4;
+        dataView.setInt32(offset, clientType);
+        offset += 4;
+        dataView.setInt32(offset, messageType);
+        offset += 4;
+        dataView.setInt32(offset, appId);
+        offset += 4;
+        dataView.setInt32(offset, imeiLen);
+        offset += 4;
+        dataView.setInt32(offset, bodyLen);
+        offset += 4;
+
+        // console.log(`Offset after headers: ${offset}`);
+
+        for (let i = 0; i < imeiLen; i++) {
+            dataView.setUint8(offset++, imei.charCodeAt(i));
+        }
+
+        // console.log(`Offset after IMEI: ${offset}`);
+
+        for (let i = 0; i < bodyLen; i++) {
+            dataView.setUint8(offset++, body.charCodeAt(i));
+        }
+
+        console.log('发送的消息:', buffer);
+        // console.log(`Final offset: ${offset}, buffer length: ${buffer.byteLength}`);
+        return buffer;
+    }
+
+    //ack确认码
+    function sendAck(data) {
+        console.log("data",data);
+        let body={
+            messageKey:data.data.messageKey,
+            fromId:data.data.toId,
+            toId:data.data.fromId,
+            appId:data.data.appId,
+            messageSequence:data.data.messageSequence,
+            serverSend:false
+        }
+        const buffer = getMsgPack(1107,JSON.stringify(body));
+        socket.send(buffer);
+    }
+
+
+    document.getElementById('sendButton').addEventListener('click', function () {
+        let toId = document.getElementById('toId').value;
+        let userId = document.getElementById('userId').value;
+        // 模拟发送数据功能
+        const message = document.getElementById('message').value;
+        const body = JSON.stringify({
+            messageId: Date.now(),
+            fromId: userId,
+            toId: toId,
+            userId: userId,
+            userSign: 'eJyrVgrxCdZLrSjILEpVsjK0MAABHbBgYkGBZwpQDChgqIOkLCQzF6TU3MjAxMLUzNASIpeZkppXkpmWmVqkZKVkZGBgZGGpBJEpzkwHClUYhacVuOWnFptmuTtZBqQbRVQEl4XqZwSXBedaFIT6m0b6JBtGupgWh_naKtUCANbALG8',
+            messageBody: message
+        });
+        socket.send(getMsgPack(1103,body));
+
+    });
+
+    document.getElementById('clearButton').addEventListener('click', function () {
+        // 清空服务器输出
+        document.getElementById('serverOutput').value = '连接开启';
+    });
+
+
+</script>
+</body>
+</html>
